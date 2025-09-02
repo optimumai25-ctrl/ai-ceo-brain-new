@@ -7,7 +7,6 @@ import pandas as pd
 import file_parser
 import embed_and_store
 from answer_with_rag import answer
-import meeting_indexer
 # ──────────────────────────────────
 # Login System
 # ──────────────────────────────────
@@ -98,7 +97,7 @@ if mode == "🔁 Refresh Data":
             try:
                 file_parser.main()
                 embed_and_store.main()
-                meeting_indexer.build_index()
+                
                 save_refresh_time()
                 st.success("✅ Data refreshed and embedded successfully.")
                 st.markdown(f"🧓 **Last Refreshed:** {load_refresh_time()}")

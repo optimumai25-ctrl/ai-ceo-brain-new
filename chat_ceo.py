@@ -183,7 +183,7 @@ elif mode == "💬 New Chat":
     # Retrieval controls
     colA, colB = st.columns([1, 1])
     with colA:
-        limit_meetings = st.checkbox("🗂️ Limit retrieval to Meetings", value=True)
+        limit_meetings = st.checkbox("🗂️ Limit retrieval to Meetings", value=False)
     with colB:
         use_rag = st.checkbox("📚 Use internal knowledge (RAG)", value=True)
 

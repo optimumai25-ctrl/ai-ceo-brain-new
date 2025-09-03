@@ -1,4 +1,3 @@
-# chat_ceo.py
 import json
 import re
 from pathlib import Path
@@ -14,7 +13,7 @@ from answer_with_rag import answer
 # ─────────────────────────────────────────────────────────────
 # App Config
 # ─────────────────────────────────────────────────────────────
-st.set_page_config(page_title="AI CEO Assistant", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="AI CEO Assistant 🧠", page_icon="🧠", layout="wide")
 
 # Simple demo login (replace with your auth if needed)
 USERNAME = "admin123"
@@ -30,16 +29,16 @@ REFRESH_PATH = Path("last_refresh.txt")
 def login():
     st.title("🔐 Login to AI CEO Assistant")
     with st.form("login_form"):
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
-        submitted = st.form_submit_button("Login")
+        u = st.text_input("👤 Username")
+        p = st.text_input("🔑 Password", type="password")
+        submitted = st.form_submit_button("➡️ Login")
         if submitted:
             if u == USERNAME and p == PASSWORD:
                 st.session_state["authenticated"] = True
-                st.success("Login successful.")
+                st.success("✅ Login successful.")
                 st.rerun()
             else:
-                st.error("Invalid username or password.")
+                st.error("❌ Invalid username or password.")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -63,7 +62,7 @@ def reset_chat():
         HIST_PATH.unlink()
 
 def save_refresh_time():
-    REFRESH_PATH.write_text(datetime.now().strftime('%b-%d-%Y %I:%M %p'))
+    REFRESH_PATH.write_text(datetime.now().strftime("%b-%d-%Y %I:%M %p"))
 
 def load_refresh_time():
     if REFRESH_PATH.exists():
@@ -72,7 +71,7 @@ def load_refresh_time():
 
 def export_history_to_csv(history: list) -> bytes:
     df = pd.DataFrame(history)
-    return df.to_csv(index=False).encode('utf-8')
+    return df.to_csv(index=False).encode("utf-8")
 
 def save_reminder_local(content: str, title_hint: str = "") -> str:
     """
@@ -90,7 +89,7 @@ def save_reminder_local(content: str, title_hint: str = "") -> str:
     fp = reminders_dir / f"{ts}_{safe_title}.txt"
 
     # If content already includes Title:/Tags:/ValidFrom:/Body:, keep it as-is
-    is_structured = bool(re.search(r'(?mi)^\s*Title:|^\s*Tags:|^\s*ValidFrom:|^\s*Body:', content))
+    is_structured = bool(re.search(r"(?mi)^\s*Title:|^\s*Tags:|^\s*ValidFrom:|^\s*Body:", content))
     if is_structured:
         payload = content.strip() + "\n"
     else:
@@ -108,35 +107,49 @@ def save_reminder_local(content: str, title_hint: str = "") -> str:
 # Sidebar
 # ─────────────────────────────────────────────────────────────
 st.sidebar.title("🧠 AI CEO Panel")
-st.sidebar.markdown(f"👤 Logged in as: `{USERNAME}`")
+st.sidebar.markdown(f"👥 Logged in as: `{USERNAME}`")
+
+# Health report (embedding_report.csv) viewer
+with st.sidebar.expander("📊 Index health (embeddings)"):
+    try:
+        df = pd.read_csv("embeddings/embedding_report.csv")
+        st.caption(f"🧾 Rows: {len(df)}")
+        # Flag sparse rows if columns exist
+        if set(["chunks", "chars"]).issubset(df.columns):
+            bad = df[(df["chunks"] == 0) | (df["chars"] < 200)]
+            if len(bad):
+                st.warning(f"⚠️ {len(bad)} file(s) look sparse (<200 chars or 0 chunks).")
+        st.dataframe(df.tail(50), use_container_width=True, height=220)
+    except Exception:
+        st.caption("ℹ️ No report yet. Run **Refresh Data**.")
 
 if st.sidebar.button("🔓 Logout"):
     st.session_state["authenticated"] = False
     st.rerun()
 
 mode = st.sidebar.radio(
-    "Navigation",
+    "🧭 Navigation",
     ["💬 New Chat", "📜 View History", "🔁 Refresh Data"],
 )
 st.sidebar.markdown("---")
-st.sidebar.caption("Tip: Start a message with **REMINDER:** to teach the assistant instantly.")
+st.sidebar.caption("💡 Tip: Start a message with **REMINDER:** to teach the assistant instantly.")
 
 # ─────────────────────────────────────────────────────────────
 # Modes
 # ─────────────────────────────────────────────────────────────
 if mode == "🔁 Refresh Data":
     st.title("🔁 Refresh AI Knowledge Base")
-    st.caption("Parses local reminders + (optional) Google Drive docs, then re-embeds.")
-    st.markdown(f"🧓 **Last Refreshed:** {load_refresh_time()}")
+    st.caption("📥 Parses local reminders + (optional) Google Drive docs, then 🧩 re-embeds.")
+    st.markdown(f"🕒 Last Refreshed: **{load_refresh_time()}**")
 
     if st.button("🚀 Run File Parser + Embedder"):
-        with st.spinner("Refreshing knowledge base..."):
+        with st.spinner("⏳ Refreshing knowledge base..."):
             try:
                 file_parser.main()       # parses ./reminders into ./parsed_data + (optional) Drive
                 embed_and_store.main()   # re-embeds and writes FAISS + metadata
                 save_refresh_time()
                 st.success("✅ Data refreshed and embedded successfully.")
-                st.markdown(f"🧓 **Last Refreshed:** {load_refresh_time()}")
+                st.markdown(f"🕒 Last Refreshed: **{load_refresh_time()}**")
             except Exception as e:
                 st.error(f"❌ Failed: {e}")
 
@@ -144,7 +157,7 @@ elif mode == "📜 View History":
     st.title("📜 Chat History")
     history = load_history()
     if not history:
-        st.info("No chat history found.")
+        st.info("ℹ️ No chat history found.")
     else:
         for turn in history:
             role = "👤 You" if turn.get("role") == "user" else "🧠 Assistant"
@@ -156,46 +169,46 @@ elif mode == "📜 View History":
             label="⬇️ Download Chat History as CSV",
             data=export_history_to_csv(history),
             file_name="chat_history.csv",
-            mime="text/csv"
+            mime="text/csv",
         )
         if st.button("🗑️ Clear Chat History"):
             reset_chat()
-            st.success("History cleared.")
+            st.success("🧹 History cleared.")
 
 elif mode == "💬 New Chat":
     st.title("🧠 AI CEO Assistant")
-    st.caption("Ask about meetings, projects, policies. Start a message with REMINDER: to teach facts.")
-    st.markdown(f"🧓 **Last Refreshed:** {load_refresh_time()}")
+    st.caption("📎 Ask about meetings, projects, policies. Start a message with **REMINDER:** to teach facts.")
+    st.markdown(f"🕒 Last Refreshed: **{load_refresh_time()}**")
 
     # Retrieval controls
     colA, colB = st.columns([1, 1])
     with colA:
-        limit_meetings = st.checkbox("Limit retrieval to Meetings", value=True)
+        limit_meetings = st.checkbox("🗂️ Limit retrieval to Meetings", value=True)
     with colB:
-        use_rag = st.checkbox("Use internal knowledge (RAG)", value=True)
+        use_rag = st.checkbox("📚 Use internal knowledge (RAG)", value=True)
 
     # Show prior turns
     history = load_history()
     for turn in history:
         with st.chat_message(turn.get("role", "assistant")):
-            st.markdown(f"**[{turn.get('timestamp', 'N/A')}]**  \n{turn.get('content', '')}")
+            st.markdown(f"🗨️ [{turn.get('timestamp', 'N/A')}]  \n{turn.get('content', '')}")
 
     # Chat input
-    user_msg = st.chat_input("Type your question or add a REMINDER…")
+    user_msg = st.chat_input("✍️ Type your question or add a REMINDER…")
     if user_msg:
         # 1) If this is a REMINDER, save it immediately to ./reminders
         if user_msg.strip().lower().startswith("reminder:"):
             body = re.sub(r"^reminder:\s*", "", user_msg.strip(), flags=re.I)
             title_hint = body.split("\n", 1)[0][:60]
             saved_path = save_reminder_local(body, title_hint=title_hint)
-            st.success(f"💾 Reminder saved: {saved_path}. Run '🔁 Refresh Data' to index it.")
+            st.success(f"💾 Reminder saved: `{saved_path}`. Run **🔁 Refresh Data** to index it.")
 
         # 2) Normal chat flow
-        now = datetime.now().strftime('%b-%d-%Y %I:%M%p')
+        now = datetime.now().strftime("%b-%d-%Y %I:%M%p")
         history.append({"role": "user", "content": user_msg, "timestamp": now})
 
         with st.chat_message("assistant"):
-            with st.spinner("Thinking…"):
+            with st.spinner("🤔 Thinking…"):
                 try:
                     # Prefer the new answer() signature with use_rag
                     reply = answer(
@@ -203,7 +216,7 @@ elif mode == "💬 New Chat":
                         k=7,
                         chat_history=history,
                         restrict_to_meetings=limit_meetings,
-                        use_rag=use_rag
+                        use_rag=use_rag,
                     )
                 except TypeError:
                     # Backward compatible with older answer() signature
@@ -211,12 +224,12 @@ elif mode == "💬 New Chat":
                         user_msg,
                         k=7,
                         chat_history=history,
-                        restrict_to_meetings=limit_meetings
+                        restrict_to_meetings=limit_meetings,
                     )
                 except Exception as e:
                     reply = f"Error: {e}"
-            ts = datetime.now().strftime('%b-%d-%Y %I:%M%p')
-            st.markdown(f"**[{ts}]**  \n{reply}")
+            ts = datetime.now().strftime("%b-%d-%Y %I:%M%p")
+            st.markdown(f"🧾 [{ts}]  \n{reply}")
 
         history.append({"role": "assistant", "content": reply, "timestamp": ts})
         save_history(history)

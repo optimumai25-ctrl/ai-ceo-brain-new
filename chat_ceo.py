@@ -1,3 +1,4 @@
+# chat_ceo.py
 import json
 import re
 from pathlib import Path
@@ -10,12 +11,12 @@ import file_parser
 import embed_and_store
 from answer_with_rag import answer
 
-# ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 # App Config
-# ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 st.set_page_config(page_title="AI CEO Assistant", page_icon="🧠", layout="wide")
 
-# Demo login (replace with OAuth if needed)
+# Simple demo login (replace with your auth if needed)
 USERNAME = "admin123"
 PASSWORD = "BestOrg123@#"
 
@@ -23,9 +24,9 @@ PASSWORD = "BestOrg123@#"
 HIST_PATH = Path("chat_history.json")
 REFRESH_PATH = Path("last_refresh.txt")
 
-# ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 # Auth
-# ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 def login():
     st.title("🔐 Login to AI CEO Assistant")
     with st.form("login_form"):
@@ -46,9 +47,9 @@ if not st.session_state["authenticated"]:
     login()
     st.stop()
 
-# ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 # Helpers
-# ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 def load_history():
     if HIST_PATH.exists():
         return json.loads(HIST_PATH.read_text(encoding="utf-8"))
@@ -78,12 +79,17 @@ def save_reminder_local(content: str, title_hint: str = "") -> str:
     Save a REMINDER as a structured .txt in ./reminders and return the file path.
     Accepts either a plain sentence or a structured block with Title/Tags/ValidFrom/Body.
     """
-    Path("reminders").mkdir(exist_ok=True)
-    ts = datetime.now().strftime("%Y-%m-%d_%H%M")
-    title = title_hint.strip() or (content.strip().split("\n", 1)[0][:60] or "Untitled")
-    safe_title = re.sub(r"[^A-Za-z0-9_\-]+", "_", title)
-    fp = Path("reminders") / f"{ts}_{safe_title}.txt"
+    reminders_dir = Path("reminders")
+    reminders_dir.mkdir(exist_ok=True)
 
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M")
+    # Prefer an explicit title, else first line of content
+    title = (title_hint or content.strip().split("\n", 1)[0][:60] or "Untitled").strip()
+    safe_title = re.sub(r"[^A-Za-z0-9_\-]+", "_", title) or "Untitled"
+
+    fp = reminders_dir / f"{ts}_{safe_title}.txt"
+
+    # If content already includes Title:/Tags:/ValidFrom:/Body:, keep it as-is
     is_structured = bool(re.search(r'(?mi)^\s*Title:|^\s*Tags:|^\s*ValidFrom:|^\s*Body:', content))
     if is_structured:
         payload = content.strip() + "\n"
@@ -94,14 +100,16 @@ def save_reminder_local(content: str, title_hint: str = "") -> str:
             f"ValidFrom: {datetime.now():%Y-%m-%d}\n"
             f"Body: {content.strip()}\n"
         )
+
     fp.write_text(payload, encoding="utf-8")
     return str(fp)
 
-# ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 # Sidebar
-# ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 st.sidebar.title("🧠 AI CEO Panel")
 st.sidebar.markdown(f"👤 Logged in as: `{USERNAME}`")
+
 if st.sidebar.button("🔓 Logout"):
     st.session_state["authenticated"] = False
     st.rerun()
@@ -113,10 +121,9 @@ mode = st.sidebar.radio(
 st.sidebar.markdown("---")
 st.sidebar.caption("Tip: Start a message with **REMINDER:** to teach the assistant instantly.")
 
-# ──────────────────────────────────
+# ─────────────────────────────────────────────────────────────
 # Modes
-# ──────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────
 if mode == "🔁 Refresh Data":
     st.title("🔁 Refresh AI Knowledge Base")
     st.caption("Parses local reminders + (optional) Google Drive docs, then re-embeds.")
@@ -125,8 +132,8 @@ if mode == "🔁 Refresh Data":
     if st.button("🚀 Run File Parser + Embedder"):
         with st.spinner("Refreshing knowledge base..."):
             try:
-                file_parser.main()
-                embed_and_store.main()
+                file_parser.main()       # parses ./reminders into ./parsed_data + (optional) Drive
+                embed_and_store.main()   # re-embeds and writes FAISS + metadata
                 save_refresh_time()
                 st.success("✅ Data refreshed and embedded successfully.")
                 st.markdown(f"🧓 **Last Refreshed:** {load_refresh_time()}")
@@ -141,8 +148,8 @@ elif mode == "📜 View History":
     else:
         for turn in history:
             role = "👤 You" if turn.get("role") == "user" else "🧠 Assistant"
-            ts = turn.get("timestamp", "N/A")
-            st.markdown(f"**{role} | [{ts}]**  \n{turn.get('content', '')}")
+            timestamp = turn.get("timestamp", "N/A")
+            st.markdown(f"**{role} | [{timestamp}]**  \n{turn.get('content', '')}")
 
         st.markdown("---")
         st.download_button(
@@ -159,13 +166,21 @@ elif mode == "💬 New Chat":
     st.title("🧠 AI CEO Assistant")
     st.caption("Ask about meetings, projects, policies. Start a message with REMINDER: to teach facts.")
     st.markdown(f"🧓 **Last Refreshed:** {load_refresh_time()}")
-    limit_meetings = st.checkbox("Limit retrieval to Meetings", value=True)
 
+    # Retrieval controls
+    colA, colB = st.columns([1, 1])
+    with colA:
+        limit_meetings = st.checkbox("Limit retrieval to Meetings", value=True)
+    with colB:
+        use_rag = st.checkbox("Use internal knowledge (RAG)", value=True)
+
+    # Show prior turns
     history = load_history()
     for turn in history:
         with st.chat_message(turn.get("role", "assistant")):
             st.markdown(f"**[{turn.get('timestamp', 'N/A')}]**  \n{turn.get('content', '')}")
 
+    # Chat input
     user_msg = st.chat_input("Type your question or add a REMINDER…")
     if user_msg:
         # 1) If this is a REMINDER, save it immediately to ./reminders
@@ -182,7 +197,22 @@ elif mode == "💬 New Chat":
         with st.chat_message("assistant"):
             with st.spinner("Thinking…"):
                 try:
-                    reply = answer(user_msg, k=7, chat_history=history, restrict_to_meetings=limit_meetings)
+                    # Prefer the new answer() signature with use_rag
+                    reply = answer(
+                        user_msg,
+                        k=7,
+                        chat_history=history,
+                        restrict_to_meetings=limit_meetings,
+                        use_rag=use_rag
+                    )
+                except TypeError:
+                    # Backward compatible with older answer() signature
+                    reply = answer(
+                        user_msg,
+                        k=7,
+                        chat_history=history,
+                        restrict_to_meetings=limit_meetings
+                    )
                 except Exception as e:
                     reply = f"Error: {e}"
             ts = datetime.now().strftime('%b-%d-%Y %I:%M%p')

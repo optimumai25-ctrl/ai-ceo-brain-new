@@ -1,15 +1,16 @@
-# semantic_search.py
 import pickle
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 from datetime import datetime
+import os
+
 import numpy as np
 import faiss
-import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# Embedding for query
 try:
     from openai import OpenAI
     _client = OpenAI()
@@ -52,12 +53,11 @@ def search(query: str, k: int = 5) -> List[Tuple[int, float, Dict]]:
     index, metadata = load_resources()
     qvec = embed_query(query).reshape(1, -1)
     D, I = index.search(qvec, max(k, 50))
-    results: List[Tuple[int, float, Dict]] = []
+    out: List[Tuple[int, float, Dict]] = []
     for dist, idx in zip(D[0], I[0]):
         if idx == -1: continue
-        meta = metadata.get(int(idx), {})
-        results.append((int(idx), float(dist), meta))
-    return results
+        out.append((int(idx), float(dist), metadata.get(int(idx), {})))
+    return out
 
 def _parse_iso(s: Optional[str]) -> Optional[datetime]:
     if not s: return None
@@ -65,11 +65,8 @@ def _parse_iso(s: Optional[str]) -> Optional[datetime]:
     except Exception: return None
 
 def _query_tags(query: str) -> List[str]:
-    # trivial keyword→tag extraction: split and lower
-    # you can expand with a proper keyword map later
     toks = [t.strip(",.?:;!()[]").lower() for t in query.split()]
-    # common business tags you might use
-    vocab = {"hr","hiring","recruiting","finance","budget","expense","policy","product","engineering","data","sales","ops","legal"}
+    vocab = {"hr","hiring","recruiting","finance","budget","expense","policy","product","engineering","data","sales","ops","legal","org","roles","ai","coordinator"}
     return [t for t in toks if t in vocab]
 
 def rerank(results: List[Tuple[int, float, Dict]], query: str, prefer_meetings: bool = False, prefer_recent: bool = False) -> List[Tuple[int,float,Dict]]:
@@ -80,19 +77,19 @@ def rerank(results: List[Tuple[int, float, Dict]], query: str, prefer_meetings: 
         _, dist, meta = item
         base = -dist  # smaller distance → larger score
         folder = str(meta.get("folder","")).lower()
-        # Meeting recency
+
+        # Meetings recency
         meet_date = _parse_iso(meta.get("meeting_date"))
         meet_bonus = (meet_date.toordinal()*10) if (prefer_recent and meet_date) else 0
         folder_bonus = 1000 if (prefer_meetings and folder == "meetings") else 0
 
-        # Reminder tags & validity
+        # Reminders: tag overlap + validity
         tags = set((meta.get("tags") or []))
-        tag_overlap = len(qtags & set([t.lower() for t in tags]))
-        tag_bonus = tag_overlap * 500  # weight per overlapping tag
+        tag_overlap = len(qtags & {t.lower() for t in tags})
+        tag_bonus = tag_overlap * 500
 
         vfrom = _parse_iso(meta.get("valid_from"))
         vto = _parse_iso(meta.get("valid_to"))
-        # validity: if within window or no window set, neutral; if expired, penalize
         valid_now = True
         if vfrom and now < vfrom: valid_now = False
         if vto and now > vto: valid_now = False

@@ -224,6 +224,7 @@ def answer(
     - Detects relative/specific dates and restricts retrieval to that window when found.
     - Skips retrieval entirely for generative asks or when use_rag=False.
     - Structures meeting digests when appropriate (Agenda / Decisions / Action Items).
+    - **Fallback B:** if restrict_to_meetings=True but no meeting hits are found, fall back to general search.
     """
     # Generative bypass or explicit GPT-only mode
     if not use_rag or is_generative(query):
@@ -236,6 +237,18 @@ def answer(
         hits = search_in_date_window(query, start, end, k=k)
     else:
         hits = search_meetings(query, k=k) if restrict_to_meetings else search(query, k=k)
+
+        # ── Fallback B: user forced meetings but none found → try general search
+        def _has_meeting_hits(hs):
+            for _, _, meta in hs:
+                if (meta.get("folder", "") or "").lower() == "meetings":
+                    return True
+            return False
+
+        if restrict_to_meetings and (not hits or not _has_meeting_hits(hits)):
+            alt = search(query, k=k)
+            if alt:
+                hits = alt
 
     if not hits:
         return ask_gpt(query, context="", chat_history=chat_history, structure="none")
@@ -252,4 +265,3 @@ def answer(
 # Optional CLI test
 if __name__ == "__main__":
     print(answer("Summarize decisions from this week.", k=7, restrict_to_meetings=True))
-

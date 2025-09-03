@@ -20,7 +20,7 @@ except Exception:
     import os
     openai.api_key = os.getenv("OPENAI_API_KEY")
 
-COMPLETIONS_MODEL = "gpt-5"
+COMPLETIONS_MODEL = "gpt-4o"
 MAX_CONTEXT_CHARS = 8000
 
 # ─────────────────────────────────────────────────────────────

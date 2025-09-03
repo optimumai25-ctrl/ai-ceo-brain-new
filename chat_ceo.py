@@ -1,24 +1,31 @@
-# chat_ceo.py
 import json
+import re
 from pathlib import Path
 from datetime import datetime
-import streamlit as st
+
 import pandas as pd
+import streamlit as st
 
 import file_parser
 import embed_and_store
 from answer_with_rag import answer
 
-from reminders_extractor import extract_from_csv
-
+# ──────────────────────────────────
+# App Config
+# ──────────────────────────────────
 st.set_page_config(page_title="AI CEO Assistant", page_icon="🧠", layout="wide")
 
+# Demo login (replace with OAuth if needed)
 USERNAME = "admin123"
 PASSWORD = "BestOrg123@#"
 
+# Paths
 HIST_PATH = Path("chat_history.json")
 REFRESH_PATH = Path("last_refresh.txt")
 
+# ──────────────────────────────────
+# Auth
+# ──────────────────────────────────
 def login():
     st.title("🔐 Login to AI CEO Assistant")
     with st.form("login_form"):
@@ -39,6 +46,9 @@ if not st.session_state["authenticated"]:
     login()
     st.stop()
 
+# ──────────────────────────────────
+# Helpers
+# ──────────────────────────────────
 def load_history():
     if HIST_PATH.exists():
         return json.loads(HIST_PATH.read_text(encoding="utf-8"))
@@ -63,23 +73,53 @@ def export_history_to_csv(history: list) -> bytes:
     df = pd.DataFrame(history)
     return df.to_csv(index=False).encode('utf-8')
 
+def save_reminder_local(content: str, title_hint: str = "") -> str:
+    """
+    Save a REMINDER as a structured .txt in ./reminders and return the file path.
+    Accepts either a plain sentence or a structured block with Title/Tags/ValidFrom/Body.
+    """
+    Path("reminders").mkdir(exist_ok=True)
+    ts = datetime.now().strftime("%Y-%m-%d_%H%M")
+    title = title_hint.strip() or (content.strip().split("\n", 1)[0][:60] or "Untitled")
+    safe_title = re.sub(r"[^A-Za-z0-9_\-]+", "_", title)
+    fp = Path("reminders") / f"{ts}_{safe_title}.txt"
+
+    is_structured = bool(re.search(r'(?mi)^\s*Title:|^\s*Tags:|^\s*ValidFrom:|^\s*Body:', content))
+    if is_structured:
+        payload = content.strip() + "\n"
+    else:
+        payload = (
+            f"Title: {title}\n"
+            f"Tags: reminder\n"
+            f"ValidFrom: {datetime.now():%Y-%m-%d}\n"
+            f"Body: {content.strip()}\n"
+        )
+    fp.write_text(payload, encoding="utf-8")
+    return str(fp)
+
+# ──────────────────────────────────
+# Sidebar
+# ──────────────────────────────────
 st.sidebar.title("🧠 AI CEO Panel")
 st.sidebar.markdown(f"👤 Logged in as: `{USERNAME}`")
-
 if st.sidebar.button("🔓 Logout"):
     st.session_state["authenticated"] = False
     st.rerun()
 
 mode = st.sidebar.radio(
     "Navigation",
-    ["💬 New Chat", "📤 Upload Chat CSV (extract REMINDERs)", "📜 View History", "🔁 Refresh Data"],
+    ["💬 New Chat", "📜 View History", "🔁 Refresh Data"],
 )
 st.sidebar.markdown("---")
-st.sidebar.caption("Use 'REMINDER:' at the start of a message to teach the assistant.")
+st.sidebar.caption("Tip: Start a message with **REMINDER:** to teach the assistant instantly.")
+
+# ──────────────────────────────────
+# Modes
+# ──────────────────────────────────
 
 if mode == "🔁 Refresh Data":
     st.title("🔁 Refresh AI Knowledge Base")
-    st.caption("Re-parse local reminders + (optional) Google Drive docs, then re-embed.")
+    st.caption("Parses local reminders + (optional) Google Drive docs, then re-embeds.")
     st.markdown(f"🧓 **Last Refreshed:** {load_refresh_time()}")
 
     if st.button("🚀 Run File Parser + Embedder"):
@@ -93,23 +133,6 @@ if mode == "🔁 Refresh Data":
             except Exception as e:
                 st.error(f"❌ Failed: {e}")
 
-elif mode == "📤 Upload Chat CSV (extract REMINDERs)":
-    st.title("📤 Upload Chat History CSV")
-    st.caption("This will extract rows starting with 'REMINDER:' into reminders/*.txt")
-    up = st.file_uploader("Choose chat_history CSV", type=["csv"])
-    if up:
-        tmp_path = Path("uploaded_chat_history.csv")
-        tmp_path.write_bytes(up.read())
-        try:
-            files = extract_from_csv(str(tmp_path))
-            st.success(f"Extracted {len(files)} reminders into ./reminders")
-            st.info("Run **Refresh Data** to index them.")
-        except Exception as e:
-            st.error(f"Extraction failed: {e}")
-        finally:
-            try: tmp_path.unlink(missing_ok=True)
-            except Exception: pass
-
 elif mode == "📜 View History":
     st.title("📜 Chat History")
     history = load_history()
@@ -118,8 +141,8 @@ elif mode == "📜 View History":
     else:
         for turn in history:
             role = "👤 You" if turn.get("role") == "user" else "🧠 Assistant"
-            timestamp = turn.get("timestamp", "N/A")
-            st.markdown(f"**{role} | [{timestamp}]**  \n{turn.get('content', '')}")
+            ts = turn.get("timestamp", "N/A")
+            st.markdown(f"**{role} | [{ts}]**  \n{turn.get('content', '')}")
 
         st.markdown("---")
         st.download_button(
@@ -134,7 +157,7 @@ elif mode == "📜 View History":
 
 elif mode == "💬 New Chat":
     st.title("🧠 AI CEO Assistant")
-    st.caption("Ask about meetings, projects, policies. Add REMINDERs via CSV to teach the assistant.")
+    st.caption("Ask about meetings, projects, policies. Start a message with REMINDER: to teach facts.")
     st.markdown(f"🧓 **Last Refreshed:** {load_refresh_time()}")
     limit_meetings = st.checkbox("Limit retrieval to Meetings", value=True)
 
@@ -143,8 +166,16 @@ elif mode == "💬 New Chat":
         with st.chat_message(turn.get("role", "assistant")):
             st.markdown(f"**[{turn.get('timestamp', 'N/A')}]**  \n{turn.get('content', '')}")
 
-    user_msg = st.chat_input("Type your question…")
+    user_msg = st.chat_input("Type your question or add a REMINDER…")
     if user_msg:
+        # 1) If this is a REMINDER, save it immediately to ./reminders
+        if user_msg.strip().lower().startswith("reminder:"):
+            body = re.sub(r"^reminder:\s*", "", user_msg.strip(), flags=re.I)
+            title_hint = body.split("\n", 1)[0][:60]
+            saved_path = save_reminder_local(body, title_hint=title_hint)
+            st.success(f"💾 Reminder saved: {saved_path}. Run '🔁 Refresh Data' to index it.")
+
+        # 2) Normal chat flow
         now = datetime.now().strftime('%b-%d-%Y %I:%M%p')
         history.append({"role": "user", "content": user_msg, "timestamp": now})
 
@@ -159,4 +190,3 @@ elif mode == "💬 New Chat":
 
         history.append({"role": "assistant", "content": reply, "timestamp": ts})
         save_history(history)
-

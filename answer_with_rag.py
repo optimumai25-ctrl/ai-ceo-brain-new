@@ -44,8 +44,8 @@ def resolve_date_window_from_query(q: str):
 
     if "last week" in s:
         weekday = today.weekday()
-        end = today - timedelta(days=weekday + 1)   # last Sunday
-        start = end - timedelta(days=6)             # last Monday
+        end = today - timedelta(days=weekday + 1)
+        start = end - timedelta(days=6)
         return (start.replace(hour=0, minute=0, second=0, microsecond=0),
                 end.replace(hour=23, minute=59, second=59, microsecond=0))
 
@@ -73,11 +73,21 @@ def resolve_date_window_from_query(q: str):
 
     return None
 
+# NEW: simple generative-intent detector
+_GEN_PAT = re.compile(
+    r"\b(idea|ideas|brainstorm|suggest|suggestions|plan|plans|strategy|strategies|framework|outline|"
+    r"write|draft|improve|optimi[sz]e|approach|roadmap|design|architecture|concept|"
+    r"marketing campaign|growth experiment)\b",
+    re.I
+)
+def is_generative(q: str) -> bool:
+    return bool(_GEN_PAT.search(q))
+
 def ask_gpt(query: str, context: str = "", chat_history: List[Dict] = []) -> str:
     system = (
         "You are a precise Virtual CEO assistant. "
-        "Use provided sources and cite [filename#chunk] like [2025-09-02_Meeting-Summary.txt#2]. "
-        "If no sources are provided, answer briefly with general knowledge."
+        "When sources are provided, use them and cite [filename#chunk] like [2025-09-02_Meeting-Summary.txt#2]. "
+        "When no sources are provided, answer with your general knowledge clearly and concisely."
     )
     messages: List[Dict] = [{"role": "system", "content": system}]
     for msg in chat_history[-4:]:
@@ -107,7 +117,18 @@ def ask_gpt(query: str, context: str = "", chat_history: List[Dict] = []) -> str
         )
         return resp.choices[0].message["content"]
 
-def answer(query: str, k: int = 5, chat_history: List[Dict] = [], restrict_to_meetings: bool = False) -> str:
+# UPDATED: add use_rag flag and generative bypass
+def answer(
+    query: str,
+    k: int = 5,
+    chat_history: List[Dict] = [],
+    restrict_to_meetings: bool = False,
+    use_rag: bool = True,             # NEW
+) -> str:
+    # If user wants pure GPT, or query looks generative/brainstormy → skip retrieval
+    if not use_rag or is_generative(query):
+        return ask_gpt(query, context="", chat_history=chat_history)
+
     win = resolve_date_window_from_query(query)
     if win:
         start, end = win
@@ -122,5 +143,6 @@ def answer(query: str, k: int = 5, chat_history: List[Dict] = [], restrict_to_me
     return ask_gpt(query, context=ctx, chat_history=chat_history)
 
 if __name__ == "__main__":
-    print(answer("Summarize decisions from last week.", k=7))
+    print(answer("Give me 10 creative team-building ideas", use_rag=False))
+
 

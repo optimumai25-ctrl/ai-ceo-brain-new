@@ -1,4 +1,3 @@
-# embed_and_store.py
 import os
 import time
 import pickle

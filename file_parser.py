@@ -1,36 +1,39 @@
-# file_parser.py
 import os
 import io
 import csv
+from pathlib import Path
+
 import streamlit as st
 import docx
 import pandas as pd
 from PyPDF2 import PdfReader
 import fitz  # PyMuPDF
-from pathlib import Path
 
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
-from google.oauth2 import service_account
-
-# Drive auth is optional now. If secrets missing, we skip Drive parsing.
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
-_has_drive = True
+# Optional Google Drive auth — safely skipped if secrets not present
 try:
-    gdrive_secrets = st.secrets["gdrive"]  # may raise
-    creds = service_account.Credentials.from_service_account_info(dict(gdrive_secrets), scopes=SCOPES)
-    service = build("drive", "v3", credentials=creds)
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaIoBaseDownload
+    from google.oauth2 import service_account
+    SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+    gdrive_secrets = st.secrets.get("gdrive", None)
+    if gdrive_secrets:
+        creds = service_account.Credentials.from_service_account_info(dict(gdrive_secrets), scopes=SCOPES)
+        service = build("drive", "v3", credentials=creds)
+    else:
+        service = None
 except Exception:
-    _has_drive = False
-    service = None
+    service = None  # no Drive available
 
-KB_FOLDER_NAME = "AI_CEO_KnowledgeBase"
-REMINDERS_FOLDER_NAME = "AI_CEO_Reminders"  # Drive-based reminders (optional)
-OUTPUT_DIR = "parsed_data"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+KB_FOLDER_NAME = "AI_CEO_KnowledgeBase"   # optional; parsed if Drive is configured
+REMINDERS_FOLDER_NAME = "AI_CEO_Reminders" # optional; parsed if Drive is configured
+OUTPUT_DIR = Path("parsed_data")
+OUTPUT_DIR.mkdir(exist_ok=True)
 
-LOWTEXT_LOG = os.path.join(OUTPUT_DIR, "low_text_files.csv")
+LOWTEXT_LOG = OUTPUT_DIR / "low_text_files.csv"
 
+# ─────────────────────────────────────────────────────────────
+# Drive helpers (only used if 'service' is available)
+# ─────────────────────────────────────────────────────────────
 def list_folder_contents(parent_id):
     results = service.files().list(
         q=f"'{parent_id}' in parents and trashed = false",
@@ -63,6 +66,9 @@ def download_file(file_id):
     fh.seek(0)
     return fh
 
+# ─────────────────────────────────────────────────────────────
+# Extractors
+# ─────────────────────────────────────────────────────────────
 def extract_text_from_pdf(fh: io.BytesIO) -> str:
     data = fh.read()
     doc = fitz.open(stream=data, filetype="pdf")
@@ -74,26 +80,32 @@ def extract_text_from_pdf(fh: io.BytesIO) -> str:
     return text
 
 def extract_text_from_docx(fh: io.BytesIO) -> str:
-    doc = docx.Document(fh)
-    return "\n".join([p.text for p in doc.paragraphs])
+    d = docx.Document(fh)
+    return "\n".join([p.text for p in d.paragraphs])
 
 def extract_text_from_excel(fh: io.BytesIO) -> str:
     df = pd.read_excel(fh)
     return df.to_string(index=False)
 
+# ─────────────────────────────────────────────────────────────
+# Save parsed TXT with headers
+# ─────────────────────────────────────────────────────────────
 def write_parsed_output(folder_label: str, name: str, text: str):
     base_name = os.path.splitext(name)[0].replace(' ', '_')
-    output_path = os.path.join(OUTPUT_DIR, f"{base_name}.txt")
-    with open(output_path, 'w', encoding='utf-8') as f:
-        f.write(f"[FOLDER]: {folder_label}\n[FILE]: {name}\n\n{text}")
+    output_path = OUTPUT_DIR / f"{base_name}.txt"
+    output_path.write_text(f"[FOLDER]: {folder_label}\n[FILE]: {name}\n\n{text}", encoding="utf-8")
     print(f"✅ Saved to {output_path}")
     if len(text.strip()) < 500:
-        hdr_exists = os.path.exists(LOWTEXT_LOG)
+        hdr_exists = LOWTEXT_LOG.exists()
         with open(LOWTEXT_LOG, "a", newline="", encoding="utf-8") as lf:
             w = csv.writer(lf)
-            if not hdr_exists: w.writerow(["folder","file","chars"])
+            if not hdr_exists:
+                w.writerow(["folder","file","chars"])
             w.writerow([folder_label, name, len(text.strip())])
 
+# ─────────────────────────────────────────────────────────────
+# Process Drive file (if Drive is configured)
+# ─────────────────────────────────────────────────────────────
 def process_and_save_drive(file, folder_label):
     file_id = file['id']
     name = file['name']
@@ -116,10 +128,23 @@ def process_and_save_drive(file, folder_label):
     except Exception as e:
         print(f"❌ Error processing {name}: {e}")
 
+# ─────────────────────────────────────────────────────────────
+# Parse local reminders (*.txt) → parsed_data
+# ─────────────────────────────────────────────────────────────
+def parse_local_reminders():
+    folder = Path("reminders")
+    if not folder.exists():
+        return
+    for fp in folder.glob("*.txt"):
+        text = fp.read_text(encoding="utf-8")
+        write_parsed_output("Reminders", fp.name, text)
+
+# ─────────────────────────────────────────────────────────────
+# Parse Drive sources (optional)
+# ─────────────────────────────────────────────────────────────
 def parse_knowledgebase_drive():
     parent_id = get_folder_id_by_exact_name(KB_FOLDER_NAME)
-    folders = list_folder_contents(parent_id)
-    for folder in folders:
+    for folder in list_folder_contents(parent_id):
         if folder['mimeType'] != 'application/vnd.google-apps.folder':
             continue
         label = folder['name']
@@ -137,20 +162,16 @@ def parse_reminders_drive():
     for file in list_folder_contents(rem_id):
         process_and_save_drive(file, "Reminders")
 
-def parse_local_reminders():
-    """Parse local reminders/*.txt into parsed_data as folder 'Reminders'."""
-    folder = Path("reminders")
-    if not folder.exists():
-        return
-    for fp in folder.glob("*.txt"):
-        text = fp.read_text(encoding="utf-8")
-        write_parsed_output("Reminders", fp.name, text)
-
+# ─────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────
 def main():
     print("🔎 Parsing sources into parsed_data/*.txt …")
-    parse_local_reminders()  # always include local reminders
+    # Always parse local reminders first
+    parse_local_reminders()
 
-    if _has_drive:
+    # Optionally parse Google Drive if configured
+    if service is not None:
         try:
             parse_knowledgebase_drive()
         except Exception as e:
@@ -164,4 +185,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
